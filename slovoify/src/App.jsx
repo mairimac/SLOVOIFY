@@ -65,11 +65,19 @@ function App() {
       const newExampleRU = phraseData.matches[1]?.segment || `Here is an example with ${cleanWord}`;
       const newExampleEN = phraseData.matches[1]?.translation || `I love this word: ${translation}`;
 
+      let lineTranslationResult = "";
+      if (contextLine) {
+        const lineRes = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(contextLine)}&langpair=ru|en`);
+        const lineData = await lineRes.json();
+        lineTranslationResult = lineData.responseData?.translatedText || "";
+      }
+
       const newCard = {
         id: Date.now(),
         word: cleanWord,
         translation,
         lyricContext: contextLine,
+        lineTranslation: lineTranslationResult,
         newExampleRU,
         newExampleEN,
         revealed: false,
@@ -328,16 +336,20 @@ const handleSaveAndSwitch = async () => {
         {lineTranslation && activeTab === "Lyrics" && (
           <div style={{
             position: 'fixed',
-            right: 0, top: 0,
+            right: 0,
+            top: 0,
             width: '400px',
+            maxWidth: '100%',
             height: '100vh',
+            boxSizing: 'border-box',
             backgroundColor: '#181818',
             boxShadow: '-10px 0 30px rgba(0,0,0,0.5)',
-            padding: '40px 20px',
+            padding: '40px 20px 60px',
             zIndex: 2999,
             borderLeft: '1px solid #333',
             animation: 'slideIn 0.3s ease-out',
-            overflowY: 'scroll'
+            overflowY: 'auto',
+            WebkitOverflowScrolling: 'touch'
           }}>
             <button onClick={() => setLineTranslation("")} style={{ background: 'none', border: 'none', color: '#1DB954', cursor: 'pointer', fontSize: '0.9rem' }}>← BACK</button>
             <p style={{ margin: '16px 0 8px', fontSize: '0.85rem', color: '#1DB954', textTransform: 'uppercase', letterSpacing: '1px' }}>
@@ -385,16 +397,20 @@ const handleSaveAndSwitch = async () => {
         {showDeepDive && activeTab === "Lyrics" && (
           <div style={{
             position: 'fixed',
-            right: 0, top: 0,
+            right: 0,
+            top: 0,
             width: '400px',
+            maxWidth: '100%',
             height: '100vh',
+            boxSizing: 'border-box',
             backgroundColor: '#181818',
             boxShadow: '-10px 0 30px rgba(0,0,0,0.5)',
-            padding: '40px 20px',
+            padding: '40px 20px 60px',
             zIndex: 3000,
             borderLeft: '1px solid #1DB954',
             animation: 'slideIn 0.3s ease-out',
-            overflowY: 'scroll'
+            overflowY: 'auto',
+            WebkitOverflowScrolling: 'touch'
           }}>
             <button onClick={() => setShowDeepDive(false)} style={{ background: 'none', border: 'none', color: '#1DB954', cursor: 'pointer' }}>← BACK</button>
             <h1 style={{ fontSize: '2rem', marginBottom: '10px' }}>{deepDiveWord}</h1>

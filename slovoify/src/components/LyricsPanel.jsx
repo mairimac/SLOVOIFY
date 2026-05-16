@@ -5,7 +5,7 @@ export default function LyricsPanel({ lyricsStatus, lyricsLines, getTranslation,
         <p className="status-msg">Loading lyrics...</p>
       )}
       {lyricsStatus === "error" && (
-        <p className="status-msg">Error loading lyrics. Try again after playing a track.</p>
+        <p className="status-msg">Lyrics not available for this track, try another song! </p>
       )}
       {lyricsStatus === "empty" && (
         <p className="status-msg">No lyrics found for this track.</p>
