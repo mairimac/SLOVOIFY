@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { SpotifyApi } from "@spotify/web-api-ts-sdk";
 
 import "./App.css";
@@ -44,30 +44,80 @@ function App() {
     const saved = localStorage.getItem("slovoify_cards");
     return saved ? JSON.parse(saved) : [];
   });
-  
+
+// 1. Updated Helper to check for ANY Cyrillic character across regional alphabets
+const isCyrillic = (text) => /[\u0400-\u04FF]/.test(text);
+
+// 2. Comprehensive Language Detection based on specific diacritics and letters
+const detectLanguage = (text) => {
+  if (!text) return 'gaelic';
+
+  // --- 1. Identify Unique Ukrainian Characters First ---
+  if (/[іїєґІЇЄҐ]/.test(text)) return 'ukrainian';
+
+  // --- 2. Identify Unique Russian Characters ---
+  if (/[ыэъёЫЭЪЁ]/.test(text)) return 'russian';
+
+  // Fallback for general Cyrillic text if no unique tracking markers are present
+  if (/[\u0400-\u04FF]/.test(text)) return 'russian';
+
+  // --- 3. Identify Central European Latin Alphabets ---
+  if (/[ąćęłńóśżźĄĆĘŁŃÓŚŻŹ]/.test(text)) return 'polish';
+  if (/[ąčęėįšųūžĄČĘĖĮŠŲŪŽ]/.test(text)) return 'lithuanian';
+
+  // --- 4. Identify Scottish Gaelic Grave Diacritics ---
+  if (/[àèìòùÀÈÌÒÙ]/.test(text)) return 'gaelic';
+
+  // Ultimate fallback choice
+  return 'gaelic';
+};
+
+// 3. Updated Mapping Configuration
+const LANGPAIR_MAP = {
+  russian: 'ru|en',
+  ukrainian: 'uk|en', // Added standard ISO translation pair
+  gaelic: 'gd|en',
+  polish: 'pl|en',
+  lithuanian: 'lt|en'
+};
+
+  // Called from LyricsPanel as (word, lineText)
+  const handleWordClick = async (word, lineText) => {
+    const clean = cleanWordForLookup(word);
+    setSelectedWord(clean);
+    setSelectedLineContext(lineText);
+    setIsPanelOpen(true);
+    setActiveTranslation("Translating...");
+
+    // Fetch a word-level translation using language detection
+    await fetchWordInfo(clean);
+  };
 
   useEffect(() => {
     localStorage.setItem("slovoify_cards", JSON.stringify(flashcards));
   }, [flashcards]);
 
   const saveFlashcard = async (word, contextLine) => {
-    const cleanWord = word.replace(/[^\p{L}']/gu, "").trim();
+    const cleanWord = word.replace(/[^A-Za-zА-Яа-яЁё']/g, "").trim();
 
     try {
-      const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanWord)}&langpair=ru|en`);
+      const detected = detectLanguage(cleanWord);
+      const langpair = LANGPAIR_MAP[detected] || 'ru|en';
+      const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanWord)}&langpair=${langpair}`);
       const data = await res.json();
       const translation = data.responseData?.translatedText || cleanWord;
-
-      const phraseUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanWord)}&langpair=auto|en`;
+      const phraseUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanWord)}&langpair=${LANGPAIR_MAP[detected] || 'gd|en'}`;
       const phraseRes = await fetch(phraseUrl);
       const phraseData = await phraseRes.json();
 
-      const newExampleRU = phraseData.matches[1]?.segment || `Here is an example with ${cleanWord}`;
-      const newExampleEN = phraseData.matches[1]?.translation || `I love this word: ${translation}`;
+      const newExampleRU = phraseData.matches?.[1]?.segment || `Here is an example with ${cleanWord}`;
+      const newExampleEN = phraseData.matches?.[1]?.translation || `I love this word: ${translation}`;
 
       let lineTranslationResult = "";
       if (contextLine) {
-        const lineRes = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(contextLine)}&langpair=ru|en`);
+        const lineDetected = detectLanguage(contextLine);
+        const lineLangpair = LANGPAIR_MAP[lineDetected] || 'ru|en';
+        const lineRes = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(contextLine)}&langpair=${lineLangpair}`);
         const lineData = await lineRes.json();
         lineTranslationResult = lineData.responseData?.translatedText || "";
       }
@@ -104,7 +154,7 @@ function App() {
       const url = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(cleanArtist)}&track_name=${encodeURIComponent(cleanTitle)}`;
       const response = await fetch(url);
       const data = await response.json();
-      const rawLyrics = data.plainLyrics ; "";
+      const rawLyrics = data.plainLyrics || "";
       setLyricsLines(
         rawLyrics.split("\n").map((line, index) => ({
           id: `${index}-${line.slice(0, 20)}`,
@@ -133,7 +183,9 @@ function App() {
     }
 
     try {
-      const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=ru|en`);
+      const detected = detectLanguage(text);
+      const langpair = LANGPAIR_MAP[detected] || 'ru|en';
+      const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langpair}`);
       const data = await res.json();
       const output = data.responseData?.translatedText || "Translation glitch. Try that line again?";
 
@@ -163,10 +215,12 @@ function App() {
     setDeepDiveHtml("");
 
     try {
+      const lang = detectLanguage(text);
       const lineAnalysisHtml = await getDeepAnalysis(
         text,
         currentTrack?.name || "Unknown Song",
-        currentTrack?.artists?.[0]?.name || "Unknown Artist"
+        currentTrack?.artists?.[0]?.name || "Unknown Artist",
+        lang
       );
       setDeepDiveHtml(lineAnalysisHtml);
     } catch (err) {
@@ -177,7 +231,7 @@ function App() {
     }
   };
 
-  const cleanWordForLookup = (word) => word.replace(/[^\p{L}']/gu, "").trim();
+  const cleanWordForLookup = (word) => word.replace(/[^A-Za-zА-Яа-яЁё']/g, "").trim();
 
   const fetchWordInfo = useCallback(async (word) => {
     if (!word) return;
@@ -187,11 +241,14 @@ function App() {
     setWordInfoError("");
 
     try {
-      const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=ru|en`);
+      const detected = detectLanguage(word);
+      const langpair = LANGPAIR_MAP[detected] || 'ru|en';
+      const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=${langpair}`);
       const data = await res.json();
       const translation = data.responseData?.translatedText || word;
 
       setWordInfo({ translation, grammar: "Translation only", partOfSpeech: "", lemma: word });
+      setActiveTranslation(translation);
     } catch (err) {
       console.error("Word Info Error:", err);
       setWordInfoError("Could not fetch word information. " + err.message);
@@ -199,18 +256,6 @@ function App() {
       setIsWordInfoLoading(false);
     }
   }, []);
-
-  const handleWordClick = (word, line) => {
-    const cleanWord = cleanWordForLookup(word);
-    if (!cleanWord) return;
-    setLineTranslation("");
-    setSelectedLineContext(line);
-    setSelectedWord(cleanWord);
-    setIsPanelOpen(true); // Open the panel immediately
-    
-    getTranslation(cleanWord);
-    fetchWordInfo(cleanWord);
-  };
 
   const closeWordPanel = () => {
     setSelectedWord("");
@@ -224,11 +269,13 @@ function App() {
   const clearTranslation = () => {
     setActiveTranslation("");
   };
-const handleSaveAndSwitch = async () => {
+
+  const handleSaveAndSwitch = async () => {
     await saveFlashcard(selectedWord, selectedLineContext);
     setActiveTab("Flashcards"); // Switch the tab
     setIsPanelOpen(false);      // Close the panel
   }
+
   useEffect(() => {
     const fetchTrack = async () => {
       try {
@@ -253,8 +300,7 @@ const handleSaveAndSwitch = async () => {
     return () => clearInterval(interval);
   }, [getRussianLyrics]);
 
-  
- return (
+  return (
     <div style={{ backgroundColor: '#121212', color: 'white', minHeight: '100vh' }}>
       <header style={{ 
         padding: '25px 40px', 
@@ -278,155 +324,154 @@ const handleSaveAndSwitch = async () => {
         </div>
       </header>
 
-        {!currentTrack ? (
-          <p className="status-msg">Play a song on Spotify to start learning!</p>
-        ) : (
-          <main>
-            <TrackMeta currentTrack={currentTrack} />
+      {!currentTrack ? (
+        <p className="status-msg">Play a song on Spotify to start learning!</p>
+      ) : (
+        <main>
+          <TrackMeta currentTrack={currentTrack} />
 
-            <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
-              <div className="tab-controls">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveTab("Lyrics");
-                    setShowDeepDive(false);
-                  }}
-                  className={`tab-button ${activeTab === "Lyrics" ? "active" : ""}`}
-                >
-                  Lyrics
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveTab("Flashcards");
-                    setShowDeepDive(false);
-                  }}
-                  className={`tab-button ${activeTab === "Flashcards" ? "active" : ""}`}
-                >
-                  Flashcards
-                </button>
-              </div>
-
-              <div className="tab-content">
-                {activeTab === "Lyrics" && (
-                  <div className="lyrics-panel">
-                    <h2 style={{ borderBottom: '1px solid #333', paddingBottom: '10px' }}>Lyrics</h2>
-                    <LyricsPanel
-                      lyricsStatus={lyricsStatus}
-                      lyricsLines={lyricsLines}
-                      getTranslation={getTranslation}
-                      handleWordClick={handleWordClick}
-                      cleanWordForLookup={cleanWordForLookup}
-                      selectedWord={selectedWord}
-                    />
-                  </div>
-                )}
-
-                {activeTab === "Flashcards" && (
-                  <div className="flashcard-panel">
-                    <FlashcardDeck flashcards={flashcards} setFlashcards={setFlashcards} />
-                  </div>
-                )}
-              </div>
-            </div>
-          </main>
-        )}
-
-        {lineTranslation && activeTab === "Lyrics" && (
-          <div style={{
-            position: 'fixed',
-            right: 0,
-            top: 0,
-            width: '400px',
-            maxWidth: '100%',
-            height: '100vh',
-            boxSizing: 'border-box',
-            backgroundColor: '#181818',
-            boxShadow: '-10px 0 30px rgba(0,0,0,0.5)',
-            padding: '40px 20px 60px',
-            zIndex: 2999,
-            borderLeft: '1px solid #333',
-            animation: 'slideIn 0.3s ease-out',
-            overflowY: 'auto',
-            WebkitOverflowScrolling: 'touch'
-          }}>
-            <button onClick={() => setLineTranslation("")} style={{ background: 'none', border: 'none', color: '#1DB954', cursor: 'pointer', fontSize: '0.9rem' }}>← BACK</button>
-            <p style={{ margin: '16px 0 8px', fontSize: '0.85rem', color: '#1DB954', textTransform: 'uppercase', letterSpacing: '1px' }}>
-              Line translation
-            </p>
-            <p style={{ margin: '0 0 8px 0', color: '#A7A7A7', fontSize: '0.95rem' }}>
-              {translatedLineRussian}
-            </p>
-            <p style={{ margin: '0 0 16px 0', fontSize: '1.1rem', lineHeight: '1.6', color: '#fff' }}>
-              {lineTranslation}
-            </p>
-            {!showDeepDive && (
+          <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
+            <div className="tab-controls">
               <button
                 type="button"
-                onClick={() => openDeepDive(deepDiveWord)}
-                style={{
-                  width: '100%',
-                  padding: '12px 18px',
-                  backgroundColor: '#1DB954',
-                  border: 'none',
-                  borderRadius: '999px',
-                  color: '#121212',
-                  cursor: 'pointer',
-                  fontWeight: 700,
+                onClick={() => {
+                  setActiveTab("Lyrics");
+                  setShowDeepDive(false);
                 }}
+                className={`tab-button ${activeTab === "Lyrics" ? "active" : ""}`}
               >
-                Deep dive into this line
+                Lyrics
               </button>
-            )}
-          </div>
-        )}
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab("Flashcards");
+                  setShowDeepDive(false);
+                }}
+                className={`tab-button ${activeTab === "Flashcards" ? "active" : ""}`}
+              >
+                Flashcards
+              </button>
+            </div>
 
-        {isPanelOpen && (
-          <WordLearningPanel
-            isOpen={isPanelOpen}
-            onClose={closeWordPanel}
-            word={selectedWord}
-            translation={activeTranslation || (isTranslating ? "Translating..." : "")}
-            usageExample={selectedLineContext}
-            onSaveFlashcard={handleSaveAndSwitch}
-            setActiveTab={setActiveTab}
-          />
-        )}
-        
-        {showDeepDive && activeTab === "Lyrics" && (
-          <div style={{
-            position: 'fixed',
-            right: 0,
-            top: 0,
-            width: '400px',
-            maxWidth: '100%',
-            height: '100vh',
-            boxSizing: 'border-box',
-            backgroundColor: '#181818',
-            boxShadow: '-10px 0 30px rgba(0,0,0,0.5)',
-            padding: '40px 20px 60px',
-            zIndex: 3000,
-            borderLeft: '1px solid #1DB954',
-            animation: 'slideIn 0.3s ease-out',
-            overflowY: 'auto',
-            WebkitOverflowScrolling: 'touch'
-          }}>
-            <button onClick={() => setShowDeepDive(false)} style={{ background: 'none', border: 'none', color: '#1DB954', cursor: 'pointer' }}>← BACK</button>
-            <h1 style={{ fontSize: '2rem', marginBottom: '10px' }}>{deepDiveWord}</h1>
-            {isDeepDiveLoading ? (
-              <p style={{ color: '#1DB954' }}>Teacher is analyzing the grammar... ✍️</p>
-            ) : (
-              <div 
-                className="ai-content-wrapper"
-                dangerouslySetInnerHTML={{ __html: deepDiveHtml }} 
-                style={{ fontSize: '0.95rem', lineHeight: '1.6', wordWrap: 'break-word' }}
-              />
-            )}
+            <div className="tab-content">
+              {activeTab === "Lyrics" && (
+                <div className="lyrics-panel">
+                  <h2 style={{ borderBottom: '1px solid #333', paddingBottom: '10px' }}>Lyrics</h2>
+                  <LyricsPanel
+                    lyricsStatus={lyricsStatus}
+                    lyricsLines={lyricsLines}
+                    getTranslation={getTranslation}
+                    handleWordClick={handleWordClick}
+                    cleanWordForLookup={cleanWordForLookup}
+                    selectedWord={selectedWord}
+                  />
+                </div>
+              )}
+
+              {activeTab === "Flashcards" && (
+                <div className="flashcard-panel">
+                  <FlashcardDeck flashcards={flashcards} setFlashcards={setFlashcards} />
+                </div>
+              )}
+            </div>
           </div>
-        )}
-      </div>
-    
+        </main>
+      )}
+
+      {lineTranslation && activeTab === "Lyrics" && (
+        <div style={{
+          position: 'fixed',
+          right: 0,
+          top: 0,
+          width: '400px',
+          maxWidth: '100%',
+          height: '100vh',
+          boxSizing: 'border-box',
+          backgroundColor: '#181818',
+          boxShadow: '-10px 0 30px rgba(0,0,0,0.5)',
+          padding: '40px 20px 60px',
+          zIndex: 2999,
+          borderLeft: '1px solid #333',
+          animation: 'slideIn 0.3s ease-out',
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch'
+        }}>
+          <button onClick={() => setLineTranslation("")} style={{ background: 'none', border: 'none', color: '#1DB954', cursor: 'pointer', fontSize: '0.9rem' }}>← BACK</button>
+          <p style={{ margin: '16px 0 8px', fontSize: '0.85rem', color: '#1DB954', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            Line translation
+          </p>
+          <p style={{ margin: '0 0 8px 0', color: '#A7A7A7', fontSize: '0.95rem' }}>
+            {translatedLineRussian}
+          </p>
+          <p style={{ margin: '0 0 16px 0', fontSize: '1.1rem', lineHeight: '1.6', color: '#fff' }}>
+            {lineTranslation}
+          </p>
+          {!showDeepDive && (
+            <button
+              type="button"
+              onClick={() => openDeepDive(deepDiveWord)}
+              style={{
+                width: '100%',
+                padding: '12px 18px',
+                backgroundColor: '#1DB954',
+                border: 'none',
+                borderRadius: '999px',
+                color: '#121212',
+                cursor: 'pointer',
+                fontWeight: 700,
+              }}
+            >
+              Deep dive into this line
+            </button>
+          )}
+        </div>
+      )}
+
+      {isPanelOpen && (
+        <WordLearningPanel
+          isOpen={isPanelOpen}
+          onClose={closeWordPanel}
+          word={selectedWord}
+          translation={activeTranslation || (isTranslating ? "Translating..." : "")}
+          usageExample={selectedLineContext}
+          onSaveFlashcard={handleSaveAndSwitch}
+          setActiveTab={setActiveTab}
+        />
+      )}
+      
+      {showDeepDive && activeTab === "Lyrics" && (
+        <div style={{
+          position: 'fixed',
+          right: 0,
+          top: 0,
+          width: '400px',
+          maxWidth: '100%',
+          height: '100vh',
+          boxSizing: 'border-box',
+          backgroundColor: '#181818',
+          boxShadow: '-10px 0 30px rgba(0,0,0,0.5)',
+          padding: '40px 20px 60px',
+          zIndex: 3000,
+          borderLeft: '1px solid #1DB954',
+          animation: 'slideIn 0.3s ease-out',
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch'
+        }}>
+          <button onClick={() => setShowDeepDive(false)} style={{ background: 'none', border: 'none', color: '#1DB954', cursor: 'pointer' }}>← BACK</button>
+          <h1 style={{ fontSize: '2rem', marginBottom: '10px' }}>{deepDiveWord}</h1>
+          {isDeepDiveLoading ? (
+            <p style={{ color: '#1DB954' }}>Teacher is analyzing the grammar... ✍️</p>
+          ) : (
+            <div 
+              className="ai-content-wrapper"
+              dangerouslySetInnerHTML={{ __html: deepDiveHtml }} 
+              style={{ fontSize: '0.95rem', lineHeight: '1.6', wordWrap: 'break-word' }}
+            />
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
